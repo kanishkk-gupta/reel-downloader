@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas
 
 version = 1.0
 
-requirements = python3==3.11.0,kivy==2.3.0,yt-dlp,certifi,charset-normalizer,idna,urllib3,requests,mutagen,pycryptodomex,websockets,brotli
+requirements = python3,kivy==2.3.0,yt-dlp,certifi,charset-normalizer,idna,urllib3,requests,mutagen,pycryptodomex,websockets,brotli
 
 # Android permissions
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
