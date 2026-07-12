@@ -10,83 +10,76 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install system dependencies
+      - name: Install system deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            build-essential git zip unzip \
-            libffi-dev libssl-dev python3-setuptools \
-            openjdk-17-jdk autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev cmake \
-            libglib2.0-dev libpango1.0-dev libcairo2-dev
+            build-essential git zip unzip libffi-dev libssl-dev \
+            cmake autoconf libtool pkg-config zlib1g-dev
 
-      - name: Set JAVA_HOME to Java 17
+      - name: Force Java 17
         run: |
-          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
-          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
-          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+          echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+          echo "/usr/lib/jvm/temurin-17-jdk-amd64/bin" >> $GITHUB_PATH
 
-      - name: Install Android command-line tools (sdkmanager)
+      - name: Wire system Android SDK into Buildozer path
         run: |
-          SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p "$SDK_ROOT/cmdline-tools"
-          
-          # Download latest command-line tools
-          wget -q "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -O /tmp/cmdline-tools.zip
-          unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools-extract
-          
-          # Place in the path Buildozer expects
-          mv /tmp/cmdline-tools-extract/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
-          
-          # Also create the legacy tools/bin/sdkmanager symlink Buildozer looks for
-          mkdir -p "$SDK_ROOT/tools/bin"
-          ln -s "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$SDK_ROOT/tools/bin/sdkmanager"
-          
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
-          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          SYSTEM_SDK="/usr/local/lib/android/sdk"
+          BSDK="$HOME/.buildozer/android/platform/android-sdk"
 
-      - name: Accept Android SDK licenses
-        run: |
-          SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p "$SDK_ROOT/licenses"
-          printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$SDK_ROOT/licenses/android-sdk-license"
-          printf "84831b9409646a918e30573bab4c9c91346d8abd" > "$SDK_ROOT/licenses/android-sdk-preview-license"
-          printf "d975f751698a77b662f1254ddbeed3901e976f5a" > "$SDK_ROOT/licenses/intel-android-extra-license"
-          printf "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" > "$SDK_ROOT/licenses/google-gdk-license"
-          
-          # Install required SDK packages
-          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            --sdk_root="$SDK_ROOT" 2>/dev/null || true
+          # Point Buildozer to the pre-installed SDK (no download needed)
+          mkdir -p "$(dirname "$BSDK")"
+          ln -sfn "$SYSTEM_SDK" "$BSDK"
 
-      - name: Install Buildozer and Cython
+          # Create the legacy tools/bin/sdkmanager wrapper Buildozer looks for
+          mkdir -p "$SYSTEM_SDK/tools/bin"
+          REAL_SM=$(find "$SYSTEM_SDK/cmdline-tools" -name "sdkmanager" -type f 2>/dev/null | head -1)
+          echo "#!/bin/bash" > "$SYSTEM_SDK/tools/bin/sdkmanager"
+          echo "exec \"$REAL_SM\" \"\$@\"" >> "$SYSTEM_SDK/tools/bin/sdkmanager"
+          chmod +x "$SYSTEM_SDK/tools/bin/sdkmanager"
+
+          # Verify Java 17 + sdkmanager work together
+          java -version
+          "$SYSTEM_SDK/tools/bin/sdkmanager" --version
+
+      - name: Accept SDK licenses
+        env:
+          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
         run: |
-          pip install --upgrade pip
-          pip install buildozer==1.5.0 cython==0.29.33
+          SYSTEM_SDK="/usr/local/lib/android/sdk"
+          mkdir -p "$SYSTEM_SDK/licenses"
+          printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\n8933bad161af4178b1185d1a37fbf41ea5269c55\n" \
+            > "$SYSTEM_SDK/licenses/android-sdk-license"
+          printf "84831b9409646a918e30573bab4c9c91346d8abd\n" \
+            > "$SYSTEM_SDK/licenses/android-sdk-preview-license"
+
+          yes | "$SYSTEM_SDK/tools/bin/sdkmanager" \
+            "platforms;android-34" "build-tools;34.0.0" \
+            --sdk_root="$SYSTEM_SDK" 2>/dev/null || true
+
+      - name: Wire system NDK into Buildozer path
+        run: |
+          SYSTEM_SDK="/usr/local/lib/android/sdk"
+          BPLATFORM="$HOME/.buildozer/android/platform"
+
+          # Buildozer looks for android-ndk-r25b; link system NDK 27 there
+          NDK_PATH=$(ls -d "$SYSTEM_SDK/ndk/"* 2>/dev/null | sort | tail -1)
+          echo "System NDK: $NDK_PATH"
+          ln -sfn "$NDK_PATH" "$BPLATFORM/android-ndk-r25b"
+
+      - name: Install Buildozer + Cython
+        run: pip install buildozer==1.5.0 cython==0.29.33
 
       - name: Build APK
-        run: |
-          buildozer -v android debug 2>&1 | tee build.log
         env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-
-      - name: Find APK
-        if: always()
-        run: find . -name "*.apk" 2>/dev/null && echo "---" || echo "No APK found"
+          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+        run: buildozer -v android debug 2>&1 | tee build.log
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
