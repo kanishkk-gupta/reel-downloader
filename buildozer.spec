@@ -15,7 +15,6 @@ android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 android.minapi = 21
 android.ndk = 25b
-android.sdk = 34
 android.accept_sdk_license = True
 
 # Build settings
